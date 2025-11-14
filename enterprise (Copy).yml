@@ -1,5 +1,5 @@
 ---
-- name: ENTERPRISE SERVICE AND MONITORING
+- name: Setup enterprise service and monitoring
   hosts: all
   become: true
   vars_files:
@@ -7,43 +7,31 @@
 
   tasks:
 
-    - name: UPDATE APT PACKAGE CACHE (DEBIAN)
-      ansible.builtin.apt:
+    - name: Ensure package manager cache is up-to-date
+      ansible.builtin.package:
         update_cache: yes
-      when: ansible_os_family == 'Debian'
-
-    - name: UPDATE DNF PACKAGE CACHE (REDHAT)
-      ansible.builtin.dnf:
-        update_cache: yes
-      when: ansible_os_family == 'RedHat'
 
     # 3.1 Enterprise Service: Apache
-    - name: APACHE WEB SERVER
+    - name: Install Apache web server
       ansible.builtin.package:
         name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
         state: present
 
-    - name: APACHE SERVICE - START AND ENABLE
+    - name: Start and enable Apache service
       ansible.builtin.service:
         name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
         state: started
         enabled: yes
 
     # 3.2 Monitoring Tool: Node Exporter
-    - name: CHECKING TAR
-      ansible.builtin.package:
-        name: tar
-        state: present
-      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
-
-    - name: NODE EXPORTER BINARY
+    - name: Download Node Exporter binary
       ansible.builtin.get_url:
         url: "https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz"
         dest: /tmp/node_exporter.tar.gz
         mode: '0644'
       when: monitoring_tool is defined and monitoring_tool == "node_exporter"
 
-    - name: EXTRACT NODE EXPORTER
+    - name: Extract Node Exporter
       ansible.builtin.unarchive:
         src: /tmp/node_exporter.tar.gz
         dest: /usr/local/bin/
@@ -51,15 +39,7 @@
         extra_opts: [--strip-components=1]
       when: monitoring_tool is defined and monitoring_tool == "node_exporter"
 
-    - name: CHECKING node_exporter BINARY IF EXECUTABLE AND OWNED APPROPRIATELY
-      ansible.builtin.file:
-        path: /usr/local/bin/node_exporter
-        mode: '0755'
-        owner: root
-        group: "{{ 'nogroup' if ansible_os_family == 'Debian' else 'nobody' }}"
-      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
-
-    - name: SYSTEMD SERVICE FOR NODE EXPORTER
+    - name: Create systemd service for Node Exporter
       ansible.builtin.copy:
         dest: /etc/systemd/system/node_exporter.service
         content: |
@@ -70,18 +50,13 @@
           [Service]
           ExecStart=/usr/local/bin/node_exporter
           User=nobody
-          Group={{ 'nogroup' if ansible_os_family == 'Debian' else 'nobody' }}
+          Group=nogroup
 
           [Install]
           WantedBy=multi-user.target
       when: monitoring_tool is defined and monitoring_tool == "node_exporter"
 
-    - name: RELOAD SYSTEMD TO PICKUP node_exporter UNIT
-      ansible.builtin.systemd:
-        daemon_reload: yes
-      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
-
-    - name: START AND ENABLE NODE EXPORTER
+    - name: Start and enable Node Exporter
       ansible.builtin.systemd:
         name: node_exporter
         state: started
@@ -89,13 +64,11 @@
       when: monitoring_tool is defined and monitoring_tool == "node_exporter"
 
     # 4.4 MOTD Message
-    - name: UPDATE MOTD
+    - name: Update MOTD
       ansible.builtin.copy:
         dest: /etc/motd
         content: "Ansible Managed by {{ motd_user | default('unknown_user') }}\n"
         owner: root
         group: root
         mode: '0644'
-
-
 
