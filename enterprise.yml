@@ -1,9 +1,9 @@
 ---
-name: Setup enterprise service and monitoring
+- name: Setup enterprise service and monitoring
   hosts: all
   become: true
   vars_files:
-    - ./config.yaml     # make sure this file is in the same directory as playbook.yml
+    - ./config.yml     # make sure this file is in the same directory as playbook.yml
 
   tasks:
 
