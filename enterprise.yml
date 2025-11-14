@@ -1,0 +1,74 @@
+---
+name: Setup enterprise service and monitoring
+  hosts: all
+  become: true
+  vars_files:
+    - ./config.yaml     # make sure this file is in the same directory as playbook.yml
+
+  tasks:
+
+    - name: Ensure package manager cache is up-to-date
+      ansible.builtin.package:
+        update_cache: yes
+
+    # 3.1 Enterprise Service: Apache
+    - name: Install Apache web server
+      ansible.builtin.package:
+        name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+        state: present
+
+    - name: Start and enable Apache service
+      ansible.builtin.service:
+        name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+        state: started
+        enabled: yes
+
+    # 3.2 Monitoring Tool: Node Exporter
+    - name: Download Node Exporter binary
+      ansible.builtin.get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        mode: '0644'
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    - name: Extract Node Exporter
+      ansible.builtin.unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    - name: Create systemd service for Node Exporter
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/local/bin/node_exporter
+          User=nobody
+          Group=nogroup
+
+          [Install]
+          WantedBy=multi-user.target
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    - name: Start and enable Node Exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    # 4.4 MOTD Message
+    - name: Update MOTD
+      ansible.builtin.copy:
+        dest: /etc/motd
+        content: "Ansible Managed by {{ motd_user | default('unknown_user') }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
