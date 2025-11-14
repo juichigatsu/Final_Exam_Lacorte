@@ -1,0 +1,21 @@
+---
+# Update package cache based on OS
+- name: UPDATE APT PACKAGE CACHE (DEBIAN)
+  ansible.builtin.apt:
+    update_cache: yes
+  when: ansible_os_family == 'Debian'
+
+- name: UPDATE DNF PACKAGE CACHE (REDHAT)
+  ansible.builtin.dnf:
+    update_cache: yes
+  when: ansible_os_family == 'RedHat'
+
+# Update MOTD
+- name: UPDATE MOTD
+  ansible.builtin.copy:
+    dest: /etc/motd
+    content: "Ansible Managed by {{ motd_user | default('unknown_user') }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+

@@ -1,0 +1,131 @@
+---
+- name: Setup enterprise service and monitoring (Dockerized)
+  hosts: all
+  become: true
+  vars_files:
+    - ./config.yml
+
+  vars:
+    httpd_image: "httpd:2.4"
+    node_exporter_image: "quay.io/prometheus/node-exporter:latest"
+    apache_container_name: "enterprise_apache"
+    node_exporter_container_name: "node_exporter"
+
+  tasks:
+
+    # -------------------------
+    # 2) Install Docker
+    # -------------------------
+    - name: Install Docker on Debian/Ubuntu (docker.io)
+      ansible.builtin.package:
+        name: docker.io
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Install Docker on RHEL/CentOS (try docker, fallback to docker-ce)
+      block:
+        - name: Try install 'docker' package from distro repos
+          ansible.builtin.package:
+            name: docker
+            state: present
+          register: docker_pkg_install
+          ignore_errors: yes
+
+        - name: If distro 'docker' package not installed, try docker-ce (best effort)
+          ansible.builtin.shell: |
+            set -e
+            dnf -y install dnf-plugins-core || true
+            dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo || true
+            dnf -y install docker-ce docker-ce-cli containerd.io || true
+          when: docker_pkg_install is failed
+      when: ansible_os_family == 'RedHat'
+
+    - name: Ensure Docker service is enabled and started
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Ensure current user (kai) is in docker group so ansible docker commands can run without sudo (best-effort)
+      ansible.builtin.user:
+        name: kai
+        groups: docker
+        append: yes
+      ignore_errors: yes
+
+    # -------------------------
+    # 3) Pull & run Apache container
+    # -------------------------
+    - name: Pull Apache image
+      ansible.builtin.shell: "docker image inspect {{ httpd_image }} >/dev/null 2>&1 || docker pull {{ httpd_image }}"
+      args:
+        warn: false
+
+    - name: Create and run Apache container (idempotent)
+      ansible.builtin.shell: |
+        if docker ps --format '{{'{{'}}.Names{{'}}'}}' | grep -x {{ apache_container_name }} >/dev/null 2>&1; then
+          # container running already
+          exit 0
+        fi
+        if docker ps -a --format '{{'{{'}}.Names{{'}}'}}' | grep -x {{ apache_container_name }} >/dev/null 2>&1; then
+          docker start {{ apache_container_name }}
+        else
+          docker run -d --name {{ apache_container_name }} -p 80:80 {{ httpd_image }}
+        fi
+      args:
+        warn: false
+
+    # -------------------------
+    # 4) Pull & run Node Exporter container
+    # -------------------------
+    - name: Pull Node Exporter image
+      ansible.builtin.shell: "docker image inspect {{ node_exporter_image }} >/dev/null 2>&1 || docker pull {{ node_exporter_image }}"
+      args:
+        warn: false
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    - name: Create and run Node Exporter container (idempotent, exports host metrics)
+      ansible.builtin.shell: |
+        # Node exporter should run with host PID and mount rootfs for accurate host metrics
+        if docker ps --format '{{'{{'}}.Names{{'}}'}}' | grep -x {{ node_exporter_container_name }} >/dev/null 2>&1; then
+          exit 0
+        fi
+        if docker ps -a --format '{{'{{'}}.Names{{'}}'}}' | grep -x {{ node_exporter_container_name }} >/dev/null 2>&1; then
+          docker start {{ node_exporter_container_name }}
+        else
+          docker run -d \
+            --name {{ node_exporter_container_name }} \
+            --pid host \
+            -v /:/host:ro,rslave \
+            -p 9100:9100 \
+            {{ node_exporter_image }} \
+            --path.rootfs=/host
+        fi
+      args:
+        warn: false
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    # -------------------------
+    # 5) Ensure node_exporter (if present) is reachable and systemd daemon reload (no-op for containers)
+    # -------------------------
+    - name: Wait for Node Exporter to respond on 9100 (optional; only checks port)
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9100
+        timeout: 10
+      delegate_to: "{{ inventory_hostname }}"
+      when: monitoring_tool is defined and monitoring_tool == "node_exporter"
+
+    # -------------------------
+    # 6) Update MOTD (unchanged)
+    # -------------------------
+    - name: Update MOTD
+      ansible.builtin.copy:
+        dest: /etc/motd
+        content: "Ansible Managed by {{ motd_user | default('unknown_user') }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+
+

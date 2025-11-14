@@ -1,0 +1,11 @@
+---
+- name: ENTERPRISE SERVICE AND MONITORING
+  hosts: all
+  become: true
+  vars_files:
+    - ./config.yml
+
+  roles:
+    - common
+    - apache
+    - node_exporter

@@ -1,0 +1,11 @@
+---
+- name: APACHE WEB SERVER
+  ansible.builtin.package:
+    name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+    state: present
+
+- name: APACHE SERVICE - START AND ENABLE
+  ansible.builtin.service:
+    name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+    state: started
+    enabled: yes
